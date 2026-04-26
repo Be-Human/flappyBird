@@ -119,9 +119,18 @@
             jumpForce: -7,
             birdCollisionRadius: 12,
             pipeWidth: 60,
-            pipeGap: 150,
-            pipeSpeed: 3,
-            pipeInterval: 1500
+            basePipeGap: 150,
+            minPipeGap: 100,
+            basePipeSpeed: 3,
+            maxPipeSpeed: 8,
+            pipeInterval: 1500,
+            cloudSpeed: 0.8,
+            cloudSpawnInterval: 4000,
+            groundHeight: 30,
+            wingFlapSpeed: 0.15,
+            difficultyIncreaseInterval: 5,
+            speedIncrease: 0.5,
+            gapDecrease: 10
         };
 
         // 游戏状态
@@ -130,10 +139,19 @@
             score: 0,
             bird: {
                 y: config.canvasHeight / 2,
-                velocity: 0
+                velocity: 0,
+                wingAngle: 0,
+                wingDirection: 1
             },
             pipes: [],
-            lastPipeTime: 0
+            lastPipeTime: 0,
+            clouds: [],
+            lastCloudTime: 0,
+            groundOffset: 0,
+            particles: [],
+            pipeSpeed: config.basePipeSpeed,
+            pipeGap: config.basePipeGap,
+            difficultyLevel: 0
         };
 
         // 获取DOM元素
@@ -164,11 +182,15 @@
             ctx.arc(0, 0, config.birdSize / 2, 0, Math.PI * 2);
             ctx.fill();
             
-            // 小鸟翅膀
+            // 小鸟翅膀（添加扑翼动画）
+            ctx.save();
+            ctx.translate(-8, 0);
+            ctx.rotate(gameState.bird.wingAngle);
             ctx.fillStyle = '#FFA500';
             ctx.beginPath();
-            ctx.ellipse(-8, 5, 10, 6, -0.3, 0, Math.PI * 2);
+            ctx.ellipse(0, 5, 10, 6, -0.3, 0, Math.PI * 2);
             ctx.fill();
+            ctx.restore();
             
             // 小鸟眼睛
             ctx.fillStyle = 'white';
@@ -189,6 +211,76 @@
             ctx.lineTo(12, 6);
             ctx.closePath();
             ctx.fill();
+            
+            ctx.restore();
+        }
+        
+        // 更新小鸟翅膀动画
+        function updateWingAnimation() {
+            // 更新翅膀角度
+            gameState.bird.wingAngle += gameState.bird.wingDirection * config.wingFlapSpeed;
+            
+            // 限制翅膀角度范围，实现上下摆动
+            if (gameState.bird.wingAngle > 0.3 || gameState.bird.wingAngle < -0.3) {
+                gameState.bird.wingDirection *= -1;
+            }
+        }
+        
+        // 生成云朵
+        function generateCloud() {
+            const cloud = {
+                x: config.canvasWidth,
+                y: Math.random() * (config.canvasHeight - 200) + 30,
+                size: Math.random() * 15 + 25,
+                opacity: Math.random() * 0.4 + 0.6
+            };
+            return cloud;
+        }
+        
+        // 绘制云朵
+        function drawClouds() {
+            gameState.clouds.forEach(cloud => {
+                ctx.save();
+                ctx.globalAlpha = cloud.opacity;
+                ctx.fillStyle = 'white';
+                
+                // 绘制云朵（多个圆形组合）
+                ctx.beginPath();
+                ctx.arc(cloud.x, cloud.y, cloud.size, 0, Math.PI * 2);
+                ctx.arc(cloud.x + cloud.size * 0.6, cloud.y - cloud.size * 0.3, cloud.size * 0.7, 0, Math.PI * 2);
+                ctx.arc(cloud.x + cloud.size * 1.2, cloud.y, cloud.size * 0.8, 0, Math.PI * 2);
+                ctx.arc(cloud.x + cloud.size * 0.6, cloud.y + cloud.size * 0.2, cloud.size * 0.6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            });
+        }
+        
+        // 绘制滚动地面
+        function drawGround() {
+            // 地面
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(0, config.canvasHeight - config.groundHeight, config.canvasWidth, config.groundHeight);
+            
+            // 草地
+            ctx.fillStyle = '#32CD32';
+            ctx.fillRect(0, config.canvasHeight - config.groundHeight - 10, config.canvasWidth, 10);
+            
+            // 地面纹理（滚动的线条）
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.lineWidth = 2;
+            
+            // 绘制多条垂直线条
+            const lineSpacing = 20;
+            const startX = gameState.groundOffset % lineSpacing;
+            
+            for (let x = startX; x < config.canvasWidth; x += lineSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(x, config.canvasHeight - config.groundHeight);
+                ctx.lineTo(x, config.canvasHeight);
+                ctx.stroke();
+            }
             
             ctx.restore();
         }
@@ -223,13 +315,11 @@
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, config.canvasWidth, config.canvasHeight);
             
-            // 地面
-            ctx.fillStyle = '#8B4513';
-            ctx.fillRect(0, config.canvasHeight - 20, config.canvasWidth, 20);
+            // 绘制云朵
+            drawClouds();
             
-            // 草地
-            ctx.fillStyle = '#32CD32';
-            ctx.fillRect(0, config.canvasHeight - 30, config.canvasWidth, 10);
+            // 绘制滚动地面
+            drawGround();
         }
 
         // 绘制分数
@@ -249,15 +339,43 @@
         // 生成管道
         function generatePipe() {
             const minHeight = 80;
-            const maxHeight = config.canvasHeight - config.pipeGap - minHeight - 20;
+            const maxHeight = config.canvasHeight - gameState.pipeGap - minHeight - 20;
             const topHeight = Math.random() * (maxHeight - minHeight) + minHeight;
             
             return {
                 x: config.canvasWidth,
                 topHeight: topHeight,
-                bottomY: topHeight + config.pipeGap,
+                bottomY: topHeight + gameState.pipeGap,
                 passed: false
             };
+        }
+        
+        // 增加难度
+        function increaseDifficulty() {
+            // 检查是否达到难度增加间隔
+            if (gameState.score % config.difficultyIncreaseInterval === 0 && gameState.score > 0) {
+                // 计算新的难度级别
+                const newDifficultyLevel = Math.floor(gameState.score / config.difficultyIncreaseInterval);
+                
+                // 只有当难度级别增加时才调整参数
+                if (newDifficultyLevel > gameState.difficultyLevel) {
+                    gameState.difficultyLevel = newDifficultyLevel;
+                    
+                    // 增加管道速度（限制最大值）
+                    gameState.pipeSpeed = Math.min(
+                        gameState.pipeSpeed + config.speedIncrease,
+                        config.maxPipeSpeed
+                    );
+                    
+                    // 缩小管道间隙（限制最小值）
+                    gameState.pipeGap = Math.max(
+                        gameState.pipeGap - config.gapDecrease,
+                        config.minPipeGap
+                    );
+                    
+                    console.log(`难度增加！速度: ${gameState.pipeSpeed.toFixed(1)}, 间隙: ${gameState.pipeGap}`);
+                }
+            }
         }
 
         // 检测圆形与矩形的碰撞
@@ -317,8 +435,30 @@
             gameState.bird.velocity += config.gravity;
             gameState.bird.y += gameState.bird.velocity;
             
-            // 更新管道
+            // 更新小鸟翅膀动画
+            updateWingAnimation();
+            
+            // 更新地面滚动
+            gameState.groundOffset += gameState.pipeSpeed;
+            
+            // 更新云朵
             const currentTime = Date.now();
+            
+            // 生成新云朵
+            if (currentTime - gameState.lastCloudTime > config.cloudSpawnInterval) {
+                gameState.clouds.push(generateCloud());
+                gameState.lastCloudTime = currentTime;
+            }
+            
+            // 移动云朵
+            gameState.clouds.forEach(cloud => {
+                cloud.x -= config.cloudSpeed;
+            });
+            
+            // 移除屏幕外的云朵
+            gameState.clouds = gameState.clouds.filter(cloud => cloud.x + cloud.size * 2 > 0);
+            
+            // 更新管道
             if (currentTime - gameState.lastPipeTime > config.pipeInterval) {
                 gameState.pipes.push(generatePipe());
                 gameState.lastPipeTime = currentTime;
@@ -326,14 +466,20 @@
             
             // 移动管道并检测得分
             gameState.pipes.forEach(pipe => {
-                pipe.x -= config.pipeSpeed;
+                pipe.x -= gameState.pipeSpeed;
                 
                 // 检测是否穿过管道
                 if (!pipe.passed && pipe.x + config.pipeWidth < config.birdX) {
                     pipe.passed = true;
                     gameState.score++;
+                    createScoreParticles(); // 得分时创建粒子效果
+                    audioManager.playScoreSound(); // 播放得分音效
+                    increaseDifficulty(); // 检查并增加难度
                 }
             });
+            
+            // 更新粒子
+            updateParticles();
             
             // 移除屏幕外的管道
             gameState.pipes = gameState.pipes.filter(pipe => pipe.x + config.pipeWidth > 0);
@@ -358,6 +504,9 @@
             // 绘制小鸟
             drawBird();
             
+            // 绘制粒子
+            drawParticles();
+            
             // 绘制分数
             drawScore();
         }
@@ -372,21 +521,168 @@
             }
         }
 
+        // 音频管理器
+        const audioManager = {
+            audioContext: null,
+            
+            init: function() {
+                try {
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.log('Web Audio API not supported');
+                }
+            },
+            
+            playJumpSound: function() {
+                if (!this.audioContext) return;
+                
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+                
+                // 设置频率和音量
+                oscillator.frequency.setValueAtTime(300, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(600, this.audioContext.currentTime + 0.1);
+                
+                gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.15);
+                
+                oscillator.type = 'sine';
+                oscillator.start(this.audioContext.currentTime);
+                oscillator.stop(this.audioContext.currentTime + 0.15);
+            },
+            
+            playScoreSound: function() {
+                if (!this.audioContext) return;
+                
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+                
+                // 设置频率和音量
+                oscillator.frequency.setValueAtTime(500, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(800, this.audioContext.currentTime + 0.1);
+                
+                gainNode.gain.setValueAtTime(0.2, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.2);
+                
+                oscillator.type = 'square';
+                oscillator.start(this.audioContext.currentTime);
+                oscillator.stop(this.audioContext.currentTime + 0.2);
+            },
+            
+            playDeathSound: function() {
+                if (!this.audioContext) return;
+                
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+                
+                // 设置频率和音量
+                oscillator.frequency.setValueAtTime(300, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(50, this.audioContext.currentTime + 0.3);
+                
+                gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.4);
+                
+                oscillator.type = 'sawtooth';
+                oscillator.start(this.audioContext.currentTime);
+                oscillator.stop(this.audioContext.currentTime + 0.4);
+            }
+        };
+        
+        // 粒子系统
+        function createScoreParticles() {
+            const particleCount = 15;
+            
+            for (let i = 0; i < particleCount; i++) {
+                gameState.particles.push({
+                    x: config.birdX + config.birdSize / 2,
+                    y: gameState.bird.y + config.birdSize / 2,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    life: 1.0,
+                    color: `hsl(${Math.random() * 60 + 30}, 100%, 50%)`,
+                    size: Math.random() * 5 + 2
+                });
+            }
+        }
+        
+        function updateParticles() {
+            for (let i = gameState.particles.length - 1; i >= 0; i--) {
+                const particle = gameState.particles[i];
+                
+                // 更新位置
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                
+                // 应用重力
+                particle.vy += 0.1;
+                
+                // 减少生命值
+                particle.life -= 0.02;
+                
+                // 移除死亡粒子
+                if (particle.life <= 0) {
+                    gameState.particles.splice(i, 1);
+                }
+            }
+        }
+        
+        function drawParticles() {
+            gameState.particles.forEach(particle => {
+                ctx.save();
+                ctx.globalAlpha = particle.life;
+                ctx.fillStyle = particle.color;
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+        
         // 开始游戏
         function startGame() {
+            // 初始化音频上下文（用户交互时）
+            if (!audioManager.audioContext) {
+                audioManager.init();
+            }
+            
             gameState = {
                 isPlaying: true,
                 score: 0,
                 bird: {
                     y: config.canvasHeight / 2,
-                    velocity: 0
+                    velocity: 0,
+                    wingAngle: 0,
+                    wingDirection: 1
                 },
                 pipes: [],
-                lastPipeTime: Date.now()
+                lastPipeTime: Date.now(),
+                clouds: [],
+                lastCloudTime: Date.now(),
+                groundOffset: 0,
+                particles: [],
+                pipeSpeed: config.basePipeSpeed,
+                pipeGap: config.basePipeGap,
+                difficultyLevel: 0
             };
             
             startScreen.classList.add('hidden');
             gameOverScreen.classList.add('hidden');
+            
+            // 初始化云朵
+            for (let i = 0; i < 3; i++) {
+                const cloud = generateCloud();
+                cloud.x = Math.random() * config.canvasWidth;
+                gameState.clouds.push(cloud);
+            }
             
             gameLoop();
         }
@@ -394,6 +690,7 @@
         // 游戏结束
         function gameOver() {
             gameState.isPlaying = false;
+            audioManager.playDeathSound(); // 播放死亡音效
             finalScoreElement.textContent = `得分: ${gameState.score}`;
             gameOverScreen.classList.remove('hidden');
         }
@@ -403,6 +700,7 @@
             if (!gameState.isPlaying) return;
             
             gameState.bird.velocity = config.jumpForce;
+            audioManager.playJumpSound(); // 播放跳跃音效
         }
 
         // 事件监听器
