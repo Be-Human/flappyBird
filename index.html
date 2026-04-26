@@ -115,8 +115,9 @@
             canvasHeight: 600,
             birdSize: 34,
             birdX: 80,
-            gravity: 0.5,
-            jumpForce: -8,
+            gravity: 0.35,
+            jumpForce: -7,
+            birdCollisionRadius: 12,
             pipeWidth: 60,
             pipeGap: 150,
             pipeSpeed: 3,
@@ -259,32 +260,49 @@
             };
         }
 
+        // 检测圆形与矩形的碰撞
+        function circleRectCollision(circleX, circleY, radius, rectLeft, rectTop, rectWidth, rectHeight) {
+            // 找到矩形中距离圆心最近的点
+            const closestX = Math.max(rectLeft, Math.min(circleX, rectLeft + rectWidth));
+            const closestY = Math.max(rectTop, Math.min(circleY, rectTop + rectHeight));
+            
+            // 计算距离
+            const distanceX = circleX - closestX;
+            const distanceY = circleY - closestY;
+            const distanceSquared = (distanceX * distanceX) + (distanceY * distanceY);
+            
+            return distanceSquared < (radius * radius);
+        }
+
         // 检测碰撞
         function checkCollision() {
+            // 小鸟中心点
+            const birdCenterX = config.birdX + config.birdSize / 2;
+            const birdCenterY = gameState.bird.y + config.birdSize / 2;
+            const radius = config.birdCollisionRadius;
+            
             // 边界检测
-            if (gameState.bird.y < 0 || 
-                gameState.bird.y + config.birdSize > config.canvasHeight - 30) {
+            if (birdCenterY - radius < 0 || 
+                birdCenterY + radius > config.canvasHeight - 30) {
                 return true;
             }
             
             // 管道碰撞检测
             for (const pipe of gameState.pipes) {
-                // 小鸟的边界
-                const birdLeft = config.birdX;
-                const birdRight = config.birdX + config.birdSize;
-                const birdTop = gameState.bird.y;
-                const birdBottom = gameState.bird.y + config.birdSize;
+                // 上管道
+                const topPipeCollision = circleRectCollision(
+                    birdCenterX, birdCenterY, radius,
+                    pipe.x, 0, config.pipeWidth, pipe.topHeight
+                );
                 
-                // 管道的边界
-                const pipeLeft = pipe.x;
-                const pipeRight = pipe.x + config.pipeWidth;
+                // 下管道
+                const bottomPipeCollision = circleRectCollision(
+                    birdCenterX, birdCenterY, radius,
+                    pipe.x, pipe.bottomY, config.pipeWidth, config.canvasHeight - pipe.bottomY
+                );
                 
-                // 检查是否在管道水平范围内
-                if (birdRight > pipeLeft && birdLeft < pipeRight) {
-                    // 检查是否碰到上管道或下管道
-                    if (birdTop < pipe.topHeight || birdBottom > pipe.bottomY) {
-                        return true;
-                    }
+                if (topPipeCollision || bottomPipeCollision) {
+                    return true;
                 }
             }
             
